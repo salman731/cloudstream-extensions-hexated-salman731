@@ -1,5 +1,9 @@
 package com.hexated
 
+import android.util.Log
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import com.google.gson.Gson
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.APIHolder.unixTimeMS
 import com.lagradost.cloudstream3.utils.*
@@ -7,6 +11,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.nicehttp.Requests
 import com.lagradost.nicehttp.Session
 import com.lagradost.cloudstream3.extractors.helper.AesHelper.cryptoAESHandler
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.nicehttp.RequestBodyTypes
 import kotlinx.coroutines.delay
 import okhttp3.Interceptor
@@ -2007,7 +2012,7 @@ object SoraExtractor : SoraStream() {
             season,
             episode,
             callback,
-            BuildConfig.GHOSTX_API,
+            "",
             "Ghostx",
             base64Decode("X3NtUWFtQlFzRVRi"),
             base64Decode("X3NCV2NxYlRCTWFU")
@@ -2493,7 +2498,7 @@ object SoraExtractor : SoraStream() {
         val headers =
             mapOf("Authorization" to "Bearer 44d784c55e9a1e3dbb586f24b18b1cbcd1521673bd6178ef385890d2f989681fe22d05e291e2e0f03fce99cbc50cd520219e52cc6e30c944a559daf53a129af18349ec98f6a0e4e66b8d370a354f4f7fbd49df0ab806d533a3db71eecc7f75131a59ce8cffc5e0cc38e8af5919c23c0d904fbe31995308f065f0ff9cd1eda488")
         val data = app.get(
-            "${BuildConfig.SFMOVIES_API}/api/mains?filters[title][\$contains]=$title",
+            "${""}/api/mains?filters[title][\$contains]=$title",
             headers = headers
         ).parsedSafe<SFMoviesSearch>()?.data
         val media = data?.find {
@@ -2518,6 +2523,371 @@ object SoraExtractor : SoraStream() {
             )
         )
     }
+
+    suspend fun invokePlayer4U(
+        title: String? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        year: Int? = null,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val fixTitle = title?.createPlayerSlug().orEmpty()
+        val fixQuery = (season?.let { "$fixTitle S${"%02d".format(it)}E${"%02d".format(episode)}" } ?: "$fixTitle $year").replace(" ","+") // It is necessary for query with year otherwise it will give wrong movie
+        val allLinks = HashSet<Player4uLinkData>()
+
+        var page = 0
+        var nextPageExists: Boolean = true
+
+        do {
+            val url = if(page == 0) {"$Player4uApi/embed?key=$fixQuery"} else {"$Player4uApi/embed?key=$fixQuery&page=$page"}
+            try {
+                var document = app.get(url, timeout = 20).document
+                allLinks.addAll(
+                    document.select(".playbtnx").map {
+                        Player4uLinkData(name = it.text(), url = it.attr("onclick"))
+                    }
+                )
+
+                if(page == 0 && season == null && allLinks.size == 0)
+                {
+                    document = app.get("$Player4uApi/embed?key=${fixTitle.replace(" ","+")}", timeout = 20).document
+                    allLinks.addAll(
+                        document.select(".playbtnx").map {
+                            Player4uLinkData(name = it.text(), url = it.attr("onclick"))
+                        }
+                    )
+                }
+
+                nextPageExists = document.select("div a").any { it.text().contains("Next", true) }
+            } catch (e: Exception) {}
+            page++
+        } while (nextPageExists && page <= 4)
+
+        allLinks.distinctBy { it.name }.forEach { link ->
+            try {
+
+                val splitName = link.name.split("|").reversed()
+                val firstPart = splitName.getOrNull(0)?.replace(title.toString(),"")?.replace(year.toString(),"")?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+                val nameFormatted = "Player4U ${if(firstPart.isNullOrEmpty()) { "" } else { "{$firstPart}" }}"
+
+                val qualityFromName = Regex("""(\d{3,4}p|4K|CAM|HQ|HD|SD|WEBRip|DVDRip|BluRay|HDRip|TVRip|HDTC|PREDVD)""", RegexOption.IGNORE_CASE)
+                    .find(nameFormatted)?.value?.uppercase() ?: "UNKNOWN"
+
+
+                val selectedQuality = getPlayer4UQuality(qualityFromName)
+
+                    val subLink = "go\\('(.*)'\\)".toRegex().find(link.url)?.groups?.get(1)?.value ?: return@forEach
+                    val iframeSource = app.get("$Player4uApi$subLink", timeout = 10, referer = Player4uApi)
+                        .document.select("iframe").attr("src")
+
+                    getPlayer4uUrl(
+                        nameFormatted,
+                        selectedQuality,
+                        "https://uqloads.xyz/e/$iframeSource",
+                        Player4uApi,
+                        callback
+                    )
+
+            } catch (_: Exception) { }
+        }
+    }
+
+    suspend fun invokeHinAuto(
+        id: Int? = null,
+        year: Int? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        val url =
+            if (season == null) "$HinAutoAPI/movie/$id" else "$HinAutoAPI/tv/$id/$season/$episode"
+        val res = app.get(url, referer = "https://autoembed.cc", timeout = 5000L).toString()
+        val json =
+            Regex("sources\\s*:\\s*(\\[[^]]*])").find(res)?.groupValues?.get(1).toString() ?: null
+        if (json != null) {
+            val jsondata = parseJsonHinAuto((json))
+            jsondata.forEach { data ->
+                val m3u8 = data.file
+                val lang = data.label
+                callback.invoke(
+                    ExtractorLink(
+                        "HIN Autoembed $lang",
+                        "HIN Autoembed $lang",
+                        m3u8,
+                        "",
+                        Qualities.P1080.value,
+                        ExtractorLinkType.M3U8
+                    )
+                )
+            }
+        }
+    }
+
+    private fun parseJsonHinAuto(json: String): HinAuto {
+        val gson = Gson()
+
+        return gson.fromJson(json, Array<HinAutoRoot2>::class.java).toList()
+    }
+
+    suspend fun invokeRiveStream(
+        id: Int? = null,
+        year: Int? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+    ) {
+        val sourceApiUrl =
+            "$RiveStreamAPI/api/backendfetch?requestID=VideoProviderServices&secretKey=rive"
+        val sourceList = app.get(sourceApiUrl).parsedSafe<RiveStreamSource>()
+        val document = app.get(RiveStreamAPI, timeout = 20).document
+        val scripts = document.select("script")
+        val appScript =
+            scripts.filter { element -> element.attr("src").contains("_app") }.first().attr("src")
+        val js = app.get("$RiveStreamAPI$appScript").text
+        val keys = """\["([^"]+)"(,\s?"([^"]+)")*\]""".toRegex().findAll(js).toList().get(1).value
+        val lsKeys =
+            keys.substringAfter("[").substringBefore("]")?.split(",")?.map { it.replace("\"", "") }
+        val secretKey = lsKeys?.let { getRiveSecretKey(id, it) }
+        if (sourceList != null) {
+            for (source: String in sourceList.data) {
+                try {
+                    val sourceStreamLink = if (season == null) {
+                        "$RiveStreamAPI/api/backendfetch?requestID=movieVideoProvider&id=$id&service=$source&secretKey=${secretKey}"
+                    } else {
+                        "$RiveStreamAPI/api/backendfetch?requestID=tvVideoProvider&id=$id&season=$season&episode=$episode&service=$source&secretKey=${secretKey}"
+                    }
+                    val sourceJson =
+                        app.get(sourceStreamLink, timeout = 10).parsedSafe<RiveStreamResponse>()
+                    if (sourceJson?.data != null) {
+                        sourceJson.data.sources.forEach { source ->
+                            callback.invoke(
+                                ExtractorLink(
+                                    "RiveStream ${source.source} ${source.quality}",
+                                    "RiveStream ${source.source} ${source.quality}",
+                                    source.url,
+                                    "",
+                                    Qualities.P1080.value,
+                                    ExtractorLinkType.M3U8
+                                )
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    TODO("Not yet implemented")
+                }
+            }
+        }
+
+        val embedApi = "$RiveStreamScraperAPI/api/embeds?api_key=d64117f26031a428449f102ced3aba73"
+        val embedSourceList = app.get(embedApi).parsedSafe<RiveStreamSource>()
+        if (embedSourceList != null) {
+            for (source in embedSourceList.data) {
+
+                val sourceStreamLink = if (season == null) {
+                    "$RiveStreamScraperAPI/api/embed?provider=$source&id=$id&api_key=d64117f26031a428449f102ced3aba73"
+                } else {
+                    "$RiveStreamScraperAPI/api/embed?provider=$source&id=$id&season=$season&episode=$episode&api_key=d64117f26031a428449f102ced3aba73"
+                }
+
+                val sourceJson =
+                    app.get(sourceStreamLink, timeout = 10).parsedSafe<RivestreamEmbedResponse>()
+                try {
+                    if (sourceJson?.data != null) {
+                        for (source in sourceJson.data.sources) {
+                            loadSourceNameExtractor(
+                                "Rivestream",
+                                source.link,
+                                "",
+                                subtitleCallback,
+                                callback
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    TODO("Not yet implemented")
+                }
+            }
+        }
+
+
+    }
+
+    suspend fun invokeVidSrcViP(
+        id: Int? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        year: Int? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val url = if (season == null) {
+            "$VidSrcVip/hnd.php?id=$id"
+        } else {
+            "$VidSrcVip/hnd.php?id=${id}&s=${season}&e=${episode}"
+        }
+        val json = app.get(url).text
+        try {
+            val objectMapper = jacksonObjectMapper()
+            val vidsrcsuList: List<VidSrcVipSource> = objectMapper.readValue(json)
+            for (source in vidsrcsuList) {
+                callback.invoke(
+                    ExtractorLink(
+                        "VidSrcVip ${source.language}",
+                        "VidSrcVip ${source.language}",
+                        source.m3u8Stream,
+                        "",
+                        Qualities.P1080.value,
+                        ExtractorLinkType.M3U8
+                    )
+                )
+            }
+        } catch (e: Exception) {
+
+        }
+    }
+
+    suspend fun invokePrimeWire(
+        id: Int? = null,
+        imdbId: String? = null,
+        title: String? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        year: Int? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val url = if (season == null) {
+            "$Primewire/embed/movie?imdb=$imdbId"
+        } else {
+            "$Primewire/embed/tv?imdb=$imdbId&season=$season&episode=$episode"
+        }
+        val doc = app.get(url, timeout = 10).document
+        val userData = doc.select("#user-data")
+        var decryptedLinks = decryptLinks(userData.attr("v"))
+        for (link in decryptedLinks) {
+            val url = "$Primewire/links/go/$link"
+            val oUrl = app.get(url,timeout = 10)
+            loadSourceNameExtractor(
+                "Primewire",
+                oUrl.url,
+                "",
+                subtitleCallback,
+                callback
+            )
+        }
+    }
+
+    suspend fun invokeRgshows(
+        id: Int? = null,
+        imdbId: String? = null,
+        title: String? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        year: Int? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val sources = listOf(
+            "vidlink",
+            "vidapi",
+            "spenembed",
+            "flixhq",
+            "vidsrc_vip",
+            "catflix_su",
+            "flicky",
+            "vidsrc_su",
+            "viet",
+            "embed_su",
+            "cineby"
+        )
+        for (source in sources) {
+            val url = if (season == null) {
+                "$Rgshows/$source/movie/$id"
+            } else {
+                "$Rgshows/$source/tv/$id/$season/$episode"
+            }
+            if (source == "flicky") {
+                try {
+                    val response = app.get(url, timeout = 20, headers = mapOf(
+                        "Referer" to "https://embed.rgshows.me",
+                        "Origin" to "https://embed.rgshows.me"
+                    ))
+                        .parsedSafe<RgshowsFlickyStream>()
+                    for (streamSource in response?.stream!!) {
+                        val cSource = "${source} ${streamSource.quality}".split(" ")
+                            .joinToString(" ") { word -> word.replaceFirstChar { it.uppercaseChar() } }
+                        callback.invoke(
+                            ExtractorLink(
+                                "Rgshows $cSource",
+                                "Rgshows $cSource",
+                                streamSource.url.toString(),
+                                "",
+                                Qualities.P1080.value,
+                                ExtractorLinkType.M3U8
+                            )
+                        )
+                    }
+                } catch (_: Exception) {
+                }
+            } else {
+                try {
+                    val response = app.get(url, timeout = 20, headers = mapOf(
+                        "Referer" to "https://embed.rgshows.me",
+                        "Origin" to "https://embed.rgshows.me"
+                    ))
+                        .parsedSafe<RgshowsStream>()
+                    val cSource = source.split("_")
+                        .joinToString(" ") { word -> word.replaceFirstChar { it.uppercaseChar() } }
+                    callback.invoke(
+                        ExtractorLink(
+                            "Rgshows ${cSource}",
+                            "Rgshows ${cSource}",
+                            response?.stream?.url!!,
+                            "",
+                            Qualities.P1080.value,
+                            ExtractorLinkType.M3U8
+                        )
+                    )
+                } catch (e: Exception) {
+                }
+            }
+
+        }
+
+        val jsonData = app.get(
+            "$RgshowsHindi/api/v1/mediaInfo?id=$imdbId",
+            headers = mapOf(
+                "Referer" to "https://embed.rgshows.me",
+                "Origin" to "https://embed.rgshows.me"
+            )
+        ).parsedSafe<RgshowsHindi>()
+        for (playlist in jsonData?.data?.playlist!!) {
+            try {
+                val json = app.post(
+                    "$RgshowsHindi/api/v1/getStream",
+                    headers = mapOf(
+                        "Referer" to "https://embed.rgshows.me",
+                        "Origin" to "https://embed.rgshows.me",
+                        "Content-Type" to "application/json"
+                    ),
+                    json = mapOf("file" to playlist.file, "key" to jsonData.data.key)
+                ).parsedSafe<RgshowsHindiResponse>()
+                callback.invoke(
+                    ExtractorLink(
+                        "Rgshows ${playlist.title}",
+                        "Rgshows ${playlist.title}",
+                        json?.data?.link!!,
+                        "",
+                        Qualities.P1080.value,
+                        ExtractorLinkType.M3U8
+                    )
+                )
+            } catch (e: Exception) {
+            }
+        }
+    }
+
 
 }
 

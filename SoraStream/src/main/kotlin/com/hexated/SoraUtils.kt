@@ -449,7 +449,7 @@ suspend fun getDumpIdAndType(title: String?, year: Int?, season: Int?): Pair<Str
     val res = tryParseJson<DumpQuickSearchData>(
         queryApi(
             "POST",
-            "${BuildConfig.DUMP_API}/search/searchWithKeyWord",
+            "${"BuildConfig.DUMP_API"}/search/searchWithKeyWord",
             mapOf(
                 "searchKeyWord" to "$title",
                 "size" to "50",
@@ -494,7 +494,7 @@ suspend fun fetchDumpEpisodes(id: String, type: String, episode: Int?): EpisodeV
     return tryParseJson<DumpMediaDetail>(
         queryApi(
             "GET",
-            "${BuildConfig.DUMP_API}/movieDrama/get",
+            "${"BuildConfig.DUMP_API"}/movieDrama/get",
             mapOf(
                 "category" to type,
                 "id" to id,
@@ -734,10 +734,10 @@ suspend fun getCrunchyrollToken(): CrunchyrollAccessToken {
         headers = mapOf(
             "User-Agent" to "Crunchyroll/3.26.1 Android/11 okhttp/4.9.2",
             "Content-Type" to "application/x-www-form-urlencoded",
-            "Authorization" to "Basic ${BuildConfig.CRUNCHYROLL_BASIC_TOKEN}"
+            "Authorization" to "Basic ${"BuildConfig.CRUNCHYROLL_BASIC_TOKEN"}"
         ),
         data = mapOf(
-            "refresh_token" to app.get(BuildConfig.CRUNCHYROLL_REFRESH_TOKEN).text,
+            "refresh_token" to app.get("BuildConfig.CRUNCHYROLL_REFRESH_TOKEN").text,
             "grant_type" to "refresh_token",
             "scope" to "offline_access"
         )
@@ -1352,7 +1352,7 @@ object DumpUtils {
 
     private fun getAesKey(): String? {
         val publicKey =
-            RSAEncryptionHelper.getPublicKeyFromString(BuildConfig.DUMP_KEY) ?: return null
+            RSAEncryptionHelper.getPublicKeyFromString("BuildConfig.DUMP_KEY") ?: return null
         return RSAEncryptionHelper.encryptText(deviceId, publicKey)
     }
 
@@ -1565,5 +1565,111 @@ object AESGCM {
         val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.getDefault())
         dateFormat.timeZone = TimeZone.getTimeZone("GMT")
         return dateFormat.format(Date())
+    }
+}
+fun decryptBase64BlowfishEbc(base64Encrypted: String, key: String): String {
+    try {
+        val encryptedBytes =  base64DecodeArray(base64Encrypted)
+        val secretKeySpec = SecretKeySpec(key.toByteArray(), "Blowfish")
+        val cipher = Cipher.getInstance("Blowfish/ECB/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, secretKeySpec)
+        val decryptedBytes = cipher.doFinal(encryptedBytes)
+        return String(decryptedBytes)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return "Decryption failed: ${e.message}"
+    }
+}
+
+// Decrypt Links using Blowfish
+fun decryptLinks(data: String): List<String> {
+    val key = data.substring(data.length - 10)
+    val ct = data.substring(0, data.length - 10)
+    val pt = decryptBase64BlowfishEbc(ct, key)
+    return pt.chunked(5)
+}
+
+suspend fun loadSourceNameExtractor(
+    source: String,
+    url: String,
+    referer: String? = null,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit,
+    quality: Int? = null,
+) {
+    loadExtractor(url, referer, subtitleCallback) { link ->
+        callback.invoke(
+            ExtractorLink(
+                "$source[${link.source}]",
+                "$source[${link.source}]",
+                link.url,
+                link.referer,
+                link.quality,
+                link.type,
+                link.headers,
+                link.extractorData
+            )
+        )
+    }
+}
+
+fun getRiveSecretKey(e: Int?,c : List<String>): String {
+    return e?.let { c[it % c.size] } ?: "rive"
+}
+
+fun String?.createPlayerSlug(): String? {
+    return this?.replace(Regex("[^A-Za-z0-9]+"), " ")?.replace(Regex("\\s+"), " ")?.trim() // Replace spaces with hyphens
+}
+
+suspend fun getPlayer4uUrl(
+    name: String,
+    selectedQuality: Int,
+    url: String,
+    referer: String?,
+    callback: (ExtractorLink) -> Unit
+) {
+    val response = app.get(url, referer = referer)
+    var script = getAndUnpack(response.text).takeIf { it.isNotEmpty() }
+        ?: response.document.selectFirst("script:containsData(sources:)")?.data()
+
+    if (script == null) {
+        val iframeUrl = Regex("""<iframe src="(.*?)"""").find(response.text)?.groupValues?.getOrNull(1) ?: return
+        val iframeResponse = app.get(iframeUrl, referer = null, headers = mapOf("Accept-Language" to "en-US,en;q=0.5"))
+        script = getAndUnpack(iframeResponse.text).takeIf { it.isNotEmpty() } ?: return
+    }
+
+    val m3u8 = Regex("file:\\s*\"(.*?m3u8.*?)\"").find(script)?.groupValues?.getOrNull(1).orEmpty()
+
+    callback.invoke(
+        ExtractorLink(
+            name,
+            name,
+            m3u8,
+            "",
+            selectedQuality,
+            ExtractorLinkType.M3U8
+        )
+    )
+
+}
+
+fun getPlayer4UQuality (quality :String) : Int
+{
+    return when (quality) {
+        "4K", "2160P" -> Qualities.P2160.value
+        "FHD", "1080P" -> Qualities.P1080.value
+        "HQ", "HD", "720P","DVDRIP","TVRIP","HDTC","PREDVD" -> Qualities.P720.value
+        "480P" -> Qualities.P480.value
+        "360P","CAM" -> Qualities.P360.value
+        "DS" -> Qualities.P144.value
+        "SD" -> Qualities.P480.value
+        "WEBRIP" -> Qualities.P720.value
+        "BLURAY", "BRRIP" -> Qualities.P1080.value
+        "HDRIP" -> Qualities.P1080.value
+        "TS" -> Qualities.P480.value
+        "R5" -> Qualities.P480.value
+        "SCR" -> Qualities.P480.value
+        "TC" -> Qualities.P480.value
+        else -> Qualities.Unknown.value
     }
 }

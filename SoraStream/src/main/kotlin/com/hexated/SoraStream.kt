@@ -40,7 +40,13 @@ import com.hexated.SoraExtractor.invokeVidsrcto
 import com.hexated.SoraExtractor.invokeCinemaTv
 import com.hexated.SoraExtractor.invokeMoflix
 import com.hexated.SoraExtractor.invokeGhostx
+import com.hexated.SoraExtractor.invokeHinAuto
 import com.hexated.SoraExtractor.invokeNepu
+import com.hexated.SoraExtractor.invokePlayer4U
+import com.hexated.SoraExtractor.invokePrimeWire
+import com.hexated.SoraExtractor.invokeRgshows
+import com.hexated.SoraExtractor.invokeRiveStream
+import com.hexated.SoraExtractor.invokeVidSrcViP
 import com.hexated.SoraExtractor.invokeWatchCartoon
 import com.hexated.SoraExtractor.invokeWatchsomuch
 import com.hexated.SoraExtractor.invokeZoechip
@@ -54,7 +60,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import kotlin.math.roundToInt
 
 open class SoraStream : TmdbProvider() {
-    override var name = "SoraStream"
+    override var name = "SoraStreamPrivate"
     override val hasMainPage = true
     override val instantLinkLoading = true
     override val useMetaLoadResponse = true
@@ -76,7 +82,7 @@ open class SoraStream : TmdbProvider() {
         const val malsyncAPI = "https://api.malsync.moe"
         const val jikanAPI = "https://api.jikan.moe/v4"
 
-        private const val apiKey = BuildConfig.TMDB_API
+        private const val apiKey = "fde5ddeba3b7dec3fc1f51852ca0fb95"
 
         /** ALL SOURCES */
         const val twoEmbedAPI = "https://www.2embed.cc"
@@ -95,11 +101,11 @@ open class SoraStream : TmdbProvider() {
         const val flixonAPI = "https://flixon.lol"
         const val smashyStreamAPI = "https://embed.smashystream.com"
         const val watchSomuchAPI = "https://watchsomuch.tv" // sub only
-        const val cinemaTvAPI = BuildConfig.CINEMATV_API
+        const val cinemaTvAPI = "BuildConfig.CINEMATV_API"
         const val nineTvAPI = "https://moviesapi.club"
         const val nowTvAPI = "https://myfilestorage.xyz"
         const val gokuAPI = "https://goku.sx"
-        const val zshowAPI = BuildConfig.ZSHOW_API
+        const val zshowAPI = "BuildConfig.ZSHOW_API"
         const val ridomoviesAPI = "https://ridomovies.tv"
         const val emoviesAPI = "https://emovies.si"
         const val multimoviesAPI = "https://multimovies.top"
@@ -124,6 +130,14 @@ open class SoraStream : TmdbProvider() {
         const val dotmoviesAPI = "https://luxmovies.biz"
         const val tvMoviesAPI = "https://www.tvseriesnmovies.com"
         const val dahmerMoviesAPI = "https://odd-bird-1319.zwuhygoaqe.workers.dev"
+        const val HinAutoAPI="https://hin.autoembed.cc"
+        const val RiveStreamAPI="https://rivestream.org"
+        const val RiveStreamScraperAPI="https://scrapper.rivestream.org"
+        const val VidSrcVip="https://vidsrc.vip"
+        const val Primewire="https://www.primewire.tf"
+        const val Player4uApi="https://player4u.xyz"
+        const val Rgshows="https://api.rgshows.me"
+        const val RgshowsHindi="https://hindi.rgshows.me"
 
         fun getType(t: String?): TvType {
             return when (t) {
@@ -354,6 +368,72 @@ open class SoraStream : TmdbProvider() {
         val res = parseJson<LinkData>(data)
 
         argamap(
+            {
+                invokePlayer4U(
+                    res.title,
+                    res.season,
+                    res.episode,
+                    res.year,
+                    callback
+                )
+            },
+            {
+                if(!res.isAnime) invokePrimeWire(
+                    res.id,
+                    res.imdbId,
+                    res.title,
+                    res.season,
+                    res.episode,
+                    res.year,
+                    subtitleCallback,
+                    callback
+                )
+            },
+            {
+                if (!res.isAnime) invokeHinAuto(
+                    res.id,
+                    res.year,
+                    res.season,
+                    res.episode,
+                    callback
+                )
+            },
+            {
+                if (!res.isAnime) invokeRiveStream(
+                    res.id,
+                    res.year,
+                    res.season,
+                    res.episode,
+                    subtitleCallback,
+                    callback
+                )
+
+            },
+
+            {
+                if(!res.isAnime) invokeVidSrcViP(
+                    res.id,
+                    res.season,
+                    res.episode,
+                    res.year,
+                    subtitleCallback,
+                    callback
+                )
+            },
+            {
+                invokeRgshows(
+                    res.id,
+                    res.imdbId,
+                    res.title,
+                    res.season,
+                    res.episode,
+                    res.year,
+                    subtitleCallback,
+                    callback
+                )
+            }
+        )
+        /*argamap(
             {
                 invokeDumpStream(
                     res.title,
@@ -688,7 +768,8 @@ open class SoraStream : TmdbProvider() {
                     callback
                 )
             }
-        )
+
+        )*/
 
         return true
     }

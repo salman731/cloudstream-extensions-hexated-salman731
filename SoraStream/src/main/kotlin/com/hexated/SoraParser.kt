@@ -481,3 +481,97 @@ data class NepuSearch(
         @JsonProperty("type") val type: String? = null,
     )
 }
+
+data class RgshowsFlickyStream(
+    val stream: List<RgshowFlickySourceResponse>,
+)
+
+data class RgshowsStream(
+    val stream: RgshowSourceResponse?,
+)
+
+data class RgshowFlickySourceResponse(
+    val url: String?,
+    val quality: String?,
+)
+
+data class RgshowSourceResponse(
+    val url: String,
+)
+
+data class RgshowsHindi(
+    val success: Boolean,
+    val data: RgshowsHindiData,
+)
+
+data class RgshowsHindiData(
+    val playlist: List<RgshowsHindiPlaylist>,
+    val key: String,
+)
+
+data class RgshowsHindiPlaylist(
+    val title: String,
+    val id: String,
+    val file: String,
+)
+
+data class RgshowsHindiResponse(
+    val success: Boolean,
+    val data: RgshowsHindiResponseData,
+)
+
+data class RgshowsHindiResponseData(
+    val link: String,
+)
+data class RiveStreamSource(
+    val data: List<String>
+)
+
+data class RiveStreamResponse(
+    val data: RiveStreamData,
+)
+
+data class RiveStreamData(
+    val sources: List<RiveStreamSourceData>,
+)
+
+data class RiveStreamSourceData(
+    val quality: String,
+    val url: String,
+    val source: String,
+    val format: String,
+)
+
+data class RivestreamEmbedResponse(
+    val data: RivestreamEmbedData,
+)
+
+data class RivestreamEmbedData(
+    val sources: List<RivestreamEmbedSource>,
+)
+
+data class RivestreamEmbedSource(
+    val host: String,
+    @JsonProperty("host_id")
+    val hostId: Long,
+    val link: String,
+)
+
+data class VidSrcVipSource(
+    val language: String,
+    @JsonProperty("m3u8_stream")
+    val m3u8Stream: String,
+)
+
+data class Player4uLinkData(
+    val name: String,
+    val url: String,
+)
+
+typealias HinAuto = List<HinAutoRoot2>;
+
+data class HinAutoRoot2(
+    val file: String,
+    val label: String,
+    val type: String,
+)

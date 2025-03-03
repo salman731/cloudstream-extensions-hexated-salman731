@@ -7,7 +7,7 @@ android {
     defaultConfig {
         val properties = Properties()
         properties.load(project.rootProject.file("local.properties").inputStream())
-
+        android.buildFeatures.buildConfig=true
         buildConfigField("String", "TMDB_API", "\"${properties.getProperty("TMDB_API")}\"")
     }
 }

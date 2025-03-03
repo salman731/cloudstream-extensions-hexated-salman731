@@ -7,7 +7,7 @@ android {
     defaultConfig {
         val properties = Properties()
         properties.load(project.rootProject.file("local.properties").inputStream())
-
+        android.buildFeatures.buildConfig=true
         buildConfigField("String", "ANICHI_API", "\"${properties.getProperty("ANICHI_API")}\"")
         buildConfigField("String", "ANICHI_SERVER", "\"${properties.getProperty("ANICHI_SERVER")}\"")
         buildConfigField("String", "ANICHI_ENDPOINT", "\"${properties.getProperty("ANICHI_ENDPOINT")}\"")
