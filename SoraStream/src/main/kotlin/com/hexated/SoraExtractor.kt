@@ -2567,7 +2567,7 @@ object SoraExtractor : SoraStream() {
             try {
 
                 val splitName = link.name.split("|").reversed()
-                val firstPart = splitName.getOrNull(0)?.replace(title.toString(),"")?.replace(year.toString(),"")?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+                val firstPart = splitName.getOrNull(0)?.trim().orEmpty()
                 val nameFormatted = "Player4U ${if(firstPart.isNullOrEmpty()) { "" } else { "{$firstPart}" }}"
 
                 val qualityFromName = Regex("""(\d{3,4}p|4K|CAM|HQ|HD|SD|WEBRip|DVDRip|BluRay|HDRip|TVRip|HDTC|PREDVD)""", RegexOption.IGNORE_CASE)
